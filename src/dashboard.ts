@@ -94,8 +94,20 @@ export interface GitStatusReader {
   status(): Promise<GitStatusSnapshot>;
 }
 
+export const DEFAULT_DASHBOARD_WATCH_INTERVAL_SECONDS = 2;
+export const DASHBOARD_CLEAR_SCREEN = "\x1b[2J\x1b[H";
+
 export type ReadDashboardSnapshotOptions = {
   gitStatusReader?: GitStatusReader;
+};
+
+export type DashboardRefreshOptions = ReadDashboardSnapshotOptions & {
+  clearScreen?: boolean;
+};
+
+export type DashboardWatchOptions = DashboardRefreshOptions & {
+  intervalSeconds?: number;
+  write?: (output: string) => void;
 };
 
 export async function readDashboardSnapshot(
@@ -118,6 +130,61 @@ export async function readDashboardSnapshot(
     plans,
     git: summarizeGitStatus(gitStatus),
   };
+}
+
+export function parseDashboardWatchInterval(value: string | boolean | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_DASHBOARD_WATCH_INTERVAL_SECONDS;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error("--interval requires a positive number of seconds");
+  }
+
+  const seconds = Number(value.trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error("--interval must be a positive number of seconds");
+  }
+
+  return seconds;
+}
+
+export async function refreshDashboard(
+  state: MarkdownState,
+  write: (output: string) => void,
+  options: DashboardRefreshOptions = {},
+): Promise<string> {
+  const { clearScreen = true, ...snapshotOptions } = options;
+  const snapshot = await readDashboardSnapshot(state, snapshotOptions);
+  const output = `${clearScreen ? DASHBOARD_CLEAR_SCREEN : ""}${renderDashboard(snapshot)}\n`;
+  write(output);
+
+  return output;
+}
+
+export async function watchDashboard(
+  state: MarkdownState,
+  options: DashboardWatchOptions = {},
+): Promise<never> {
+  const {
+    intervalSeconds = DEFAULT_DASHBOARD_WATCH_INTERVAL_SECONDS,
+    write = (output: string) => {
+      process.stdout.write(output);
+    },
+    ...refreshOptions
+  } = options;
+  const delayMs = dashboardWatchDelayMs(intervalSeconds);
+
+  await refreshDashboard(state, write, refreshOptions);
+
+  return new Promise<never>((_resolve, reject) => {
+    const timer = setInterval(() => {
+      void refreshDashboard(state, write, refreshOptions).catch((error) => {
+        clearInterval(timer);
+        reject(error);
+      });
+    }, delayMs);
+  });
 }
 
 export function renderDashboard(snapshot: DashboardSnapshot): string {
@@ -441,4 +508,12 @@ function formatLogEntry(entry: DashboardLogEntry): string {
 
 function formatCount(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function dashboardWatchDelayMs(intervalSeconds: number): number {
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+    throw new Error("--interval must be a positive number of seconds");
+  }
+
+  return Math.max(1, Math.round(intervalSeconds * 1000));
 }

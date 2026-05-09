@@ -5,7 +5,14 @@ import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { readDashboardSnapshot, renderDashboard } from "../src/dashboard";
+import {
+  DASHBOARD_CLEAR_SCREEN,
+  DEFAULT_DASHBOARD_WATCH_INTERVAL_SECONDS,
+  parseDashboardWatchInterval,
+  readDashboardSnapshot,
+  refreshDashboard,
+  renderDashboard,
+} from "../src/dashboard";
 import type { DashboardSnapshot, GitStatusReader } from "../src/dashboard";
 import { parseGitStatus } from "../src/git";
 import type { GitStatusSnapshot } from "../src/git";
@@ -177,6 +184,33 @@ test("renderDashboard shows clear empty states", () => {
   }));
   assert.match(initialized, /State: initialized/);
   assert.match(initialized, /No active plans\./);
+});
+
+test("parseDashboardWatchInterval accepts only positive seconds", () => {
+  assert.equal(parseDashboardWatchInterval(undefined), DEFAULT_DASHBOARD_WATCH_INTERVAL_SECONDS);
+  assert.equal(parseDashboardWatchInterval("5"), 5);
+  assert.equal(parseDashboardWatchInterval("0.5"), 0.5);
+
+  assert.throws(() => parseDashboardWatchInterval(true), /--interval requires a positive number of seconds/);
+  assert.throws(() => parseDashboardWatchInterval("0"), /--interval must be a positive number of seconds/);
+  assert.throws(() => parseDashboardWatchInterval("-1"), /--interval must be a positive number of seconds/);
+  assert.throws(() => parseDashboardWatchInterval("abc"), /--interval must be a positive number of seconds/);
+});
+
+test("refreshDashboard writes one cleared dashboard render", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const writes: string[] = [];
+
+    const output = await refreshDashboard(state, (value) => writes.push(value), {
+      gitStatusReader: new StubGitStatusReader(parseGitStatus("")),
+    });
+
+    assert.deepEqual(writes, [output]);
+    assert.ok(output.startsWith(DASHBOARD_CLEAR_SCREEN));
+    assert.match(output, /Crack Dashboard/);
+    assert.match(output, /State: \.crack not initialized/);
+  });
 });
 
 async function withRepo(run: (root: string) => Promise<void>): Promise<void> {

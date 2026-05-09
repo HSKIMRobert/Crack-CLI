@@ -33,6 +33,23 @@ test("dashboard command is listed in CLI help", async () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /dashboard \[--root <path>\]/);
+  assert.match(result.stdout, /\[--watch\] \[--interval <seconds>\]/);
+});
+
+test("dashboard watch rejects invalid intervals", async () => {
+  const result = await captureMain(["dashboard", "--watch", "--interval", "-1"]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /--interval must be a positive number of seconds/);
+});
+
+test("dashboard interval requires watch mode", async () => {
+  const result = await captureMain(["dashboard", "--interval", "1"]);
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /--interval can only be used with --watch/);
 });
 
 async function withGitRepo(run: (root: string) => Promise<void>): Promise<void> {
