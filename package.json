@@ -6,8 +6,9 @@
     "crack": "./dist/src/cli.js"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "build": "rm -rf dist && tsc && chmod +x dist/src/cli.js",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:e2e": "npm run build && CRACK_E2E_CODEX=1 node --test dist/tests/*.e2e.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

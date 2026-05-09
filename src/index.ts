@@ -1,5 +1,12 @@
 export { Router } from "./router";
 export type { RouteAction, RouteDecision, RouteOptions } from "./router";
+export {
+  CODEX_CLI_MODEL,
+  CODEX_CLI_REASONING_EFFORT,
+  CODEX_CLI_SERVICE_TIER,
+  codexCliDefaultArgs,
+  withCodexCliDefaults,
+} from "./codex-cli";
 export { GitCliBranchManager } from "./git";
 export {
   GitCliCommitter,

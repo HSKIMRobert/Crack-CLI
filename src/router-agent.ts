@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { withCodexCliDefaults } from "./codex-cli";
 import { runProcess } from "./process";
 import type { ActivePlan } from "./state";
 
@@ -70,7 +71,7 @@ export class CodexRouterAgent implements RouterAgent {
           "read-only",
           "--output-last-message",
           outputPath,
-          ...this.extraArgs,
+          ...withCodexCliDefaults(this.extraArgs),
           "-",
         ],
         { cwd: repoRoot, input: prompt },

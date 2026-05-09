@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { withCodexCliDefaults } from "./codex-cli";
 import { runProcess } from "./process";
 
 export type PlannerAgentInput = {
@@ -63,7 +64,7 @@ export class CodexPlannerAgent implements PlannerAgent {
           "workspace-write",
           "--output-last-message",
           outputPath,
-          ...this.extraArgs,
+          ...withCodexCliDefaults(this.extraArgs),
           "-",
         ],
         { cwd: repoRoot, input: prompt },

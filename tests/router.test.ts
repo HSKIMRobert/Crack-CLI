@@ -37,6 +37,25 @@ test("route creates a new plan when no lock or plan is selected", async () => {
   });
 });
 
+test("route derives a git-safe branch name from prompt punctuation", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const planner = new StubPlannerAgent();
+    const branches = new StubBranchManager();
+
+    const decision = await new Router(state, new UnusedRouterAgent(), planner, branches).route(
+      "crack project의 CLI 동작을 모니터링 할 수 있는 대시보드를 추가해주세요.",
+      { receivedAt: "2026-05-09 12:00" },
+    );
+
+    const planPath = path.join(root, ".crack", "plans", "codex-crack-project-cli", "plan.md");
+    assert.equal(decision.action, "create_new_plan");
+    assert.equal(decision.target, planPath);
+    assert.deepEqual(branches.preparedBranches, ["codex/crack-project-cli"]);
+    assert.match(await readFile(planPath, "utf8"), /Branch: codex\/crack-project-cli/);
+  });
+});
+
 test("route appends to inbox while PR lock exists", async () => {
   await withRepo(async (root) => {
     const state = new MarkdownState(root);

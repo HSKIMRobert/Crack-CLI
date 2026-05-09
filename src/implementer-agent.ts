@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { withCodexCliDefaults } from "./codex-cli";
 import { runProcess } from "./process";
 
 export type ImplementerAgentInput = {
@@ -104,7 +105,7 @@ export class CodexImplementerAgent implements ImplementerAgent {
       const args = [
         ...argsBeforeOutputPath,
         outputPath,
-        ...this.extraArgs,
+        ...withCodexCliDefaults(this.extraArgs),
         ...(sessionId ? [sessionId] : []),
         "-",
       ];

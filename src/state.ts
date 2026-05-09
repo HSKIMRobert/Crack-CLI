@@ -58,7 +58,13 @@ export function quotePrompt(prompt: string): string {
 }
 
 export function slugify(value: string, fallback = "request"): string {
-  const slug = value.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .replace(/\.lock$/i, "-lock");
+
   return slug || fallback;
 }
 
