@@ -1,0 +1,16 @@
+{
+  "name": "crack",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "crack": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
