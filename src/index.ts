@@ -70,6 +70,21 @@ export type {
   MergeMode,
 } from "./merge-agent";
 export {
+  GitCliLocalMergeGit,
+  MergeRunner,
+} from "./merge";
+export type {
+  GitCommandResult,
+  LocalMergeGit,
+  LocalMergeOptions,
+  LocalMergeResult,
+} from "./merge";
+export {
+  branchNameFromPlan,
+  checkPlanReady,
+} from "./plan-readiness";
+export type { PlanReadiness } from "./plan-readiness";
+export {
   GitHubCliPullRequestCreator,
   PullRequestRunner,
   parsePullRequestUrl,
