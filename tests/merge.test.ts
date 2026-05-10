@@ -7,7 +7,15 @@ import assert from "node:assert/strict";
 import { parseGitStatus } from "../src/git";
 import type { GitStatusSnapshot } from "../src/git";
 import { MergeRunner } from "../src/merge";
-import type { GitCommandResult, LocalMergeGit } from "../src/merge";
+import type {
+  GitCommandResult,
+  LocalMergeGit,
+  MergePullRequest,
+  PullRequestMergeInput,
+  PullRequestMergeTarget,
+  PullRequestMerger,
+  RemoteMergeGit,
+} from "../src/merge";
 import type { MergeAgent, MergeAgentInput, MergeAgentResult } from "../src/merge-agent";
 import { MarkdownState } from "../src/state";
 
@@ -177,6 +185,170 @@ test("mergeLocal refuses to merge with a dirty working tree", async () => {
   });
 });
 
+test("mergeRemote pushes the branch, merges a ready PR, and clears a matching lock", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await createCompletedPlan(state);
+    await state.setPrLock({
+      branchName: "codex/current",
+      prUrl: "https://github.com/example/repo/pull/7",
+      reason: "Reviewing.",
+    });
+
+    const agent = new StubMergeAgent({ status: "ready", summary: "unused" });
+    const git = new StubRemoteMergeGit({
+      statuses: [parseGitStatus("")],
+    });
+    const pullRequests = new StubPullRequestMerger({
+      url: "https://github.com/example/repo/pull/7",
+      title: "Current",
+      reused: true,
+    });
+
+    const result = await new MergeRunner(state, agent, git, pullRequests).mergeRemote({
+      planPath: plan.plan,
+      receivedAt: "2026-05-09 14:00",
+    });
+
+    assert.equal(result.action, "merged_remote");
+    assert.equal(result.sourceBranch, "codex/current");
+    assert.equal(result.targetBranch, "main");
+    assert.equal(result.prUrl, "https://github.com/example/repo/pull/7");
+    assert.equal(result.lockCleared, true);
+    assert.deepEqual(git.calls, ["status", "push codex/current"]);
+    assert.deepEqual(pullRequests.calls, [
+      "ensure codex/current main",
+      "merge https://github.com/example/repo/pull/7",
+    ]);
+    assert.equal(agent.inputs.length, 0);
+    assert.equal(await state.readPrLock(), null);
+
+    const log = await readFile(plan.log, "utf8");
+    assert.match(log, /Merged remote PR https:\/\/github\.com\/example\/repo\/pull\/7 into `main`\./);
+    assert.match(log, /Cleared PR lock for `codex\/current`\./);
+  });
+});
+
+test("mergeRemote updates the source branch and lets the merge agent resolve remote conflicts", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await createCompletedPlan(state);
+    const agent = new StubMergeAgent({
+      status: "ready",
+      summary: "Resolved remote conflict.",
+    });
+    const git = new StubRemoteMergeGit({
+      statuses: [
+        parseGitStatus(""),
+        parseGitStatus("UU src/merge.ts\n"),
+      ],
+      mergeResults: [
+        gitResult({ status: 1, stderr: "CONFLICT (content): Merge conflict in src/merge.ts\n" }),
+      ],
+      unmergedPathBatches: [["src/merge.ts"], []],
+      pendingMergeCommit: true,
+    });
+    const pullRequests = new StubPullRequestMerger(
+      {
+        url: "https://github.com/example/repo/pull/8",
+        title: "Current",
+        reused: false,
+      },
+      [
+        gitResult({
+          status: 1,
+          stderr: "Pull request is not mergeable: base branch was modified and has conflicts.\n",
+        }),
+        gitResult(),
+      ],
+    );
+
+    const result = await new MergeRunner(state, agent, git, pullRequests).mergeRemote({
+      planPath: plan.plan,
+      targetBranch: "release",
+      receivedAt: "2026-05-09 14:00",
+    });
+
+    assert.equal(result.action, "merged_remote");
+    assert.equal(result.targetBranch, "release");
+    assert.equal(result.lockCleared, false);
+    assert.deepEqual(git.calls, [
+      "status",
+      "push codex/current",
+      "fetch release",
+      "switch codex/current",
+      "merge origin/release",
+      "unmerged",
+      "status",
+      "unmerged",
+      "has pending merge commit",
+      "commit --no-edit",
+      "push codex/current",
+    ]);
+    assert.deepEqual(pullRequests.calls, [
+      "ensure codex/current release",
+      "merge https://github.com/example/repo/pull/8",
+      "merge https://github.com/example/repo/pull/8",
+    ]);
+    assert.equal(agent.inputs.length, 1);
+    assert.equal(agent.inputs[0].mergeMode, "remote");
+    assert.equal(agent.inputs[0].sourceBranch, "codex/current");
+    assert.equal(agent.inputs[0].targetBranch, "release");
+    assert.match(agent.inputs[0].failedMergeCommand, /git merge origin\/release/);
+
+    const log = await readFile(plan.log, "utf8");
+    assert.match(log, /Merge agent summary: Resolved remote conflict\./);
+    assert.match(log, /Merged remote PR https:\/\/github\.com\/example\/repo\/pull\/8 into `release`\./);
+  });
+});
+
+test("mergeRemote keeps the PR lock when the PR merge fails", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await createCompletedPlan(state);
+    await state.setPrLock({
+      branchName: "codex/current",
+      prUrl: "https://github.com/example/repo/pull/7",
+      reason: "Reviewing.",
+    });
+
+    const agent = new StubMergeAgent({ status: "ready", summary: "unused" });
+    const git = new StubRemoteMergeGit({
+      statuses: [parseGitStatus("")],
+    });
+    const pullRequests = new StubPullRequestMerger(
+      {
+        url: "https://github.com/example/repo/pull/7",
+        title: "Current",
+        reused: true,
+      },
+      [gitResult({ status: 1, stderr: "Required status check is pending.\n" })],
+    );
+
+    const result = await new MergeRunner(state, agent, git, pullRequests).mergeRemote({
+      planPath: plan.plan,
+      receivedAt: "2026-05-09 14:00",
+    });
+
+    assert.deepEqual(result, {
+      action: "needs_work",
+      planPath: plan.plan,
+      sourceBranch: "codex/current",
+      targetBranch: "main",
+      reason: "Failed to merge remote PR: Required status check is pending.",
+    });
+    assert.notEqual(await state.readPrLock(), null);
+    assert.deepEqual(git.calls, ["status", "push codex/current"]);
+    assert.deepEqual(pullRequests.calls, [
+      "ensure codex/current main",
+      "merge https://github.com/example/repo/pull/7",
+    ]);
+
+    const log = await readFile(plan.log, "utf8");
+    assert.match(log, /Remote merge needs work: Failed to merge remote PR: Required status check is pending\./);
+  });
+});
+
 async function withRepo(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(path.join(tmpdir(), "crack-"));
 
@@ -247,7 +419,7 @@ class StubLocalMergeGit implements LocalMergeGit {
   private readonly statuses: GitStatusSnapshot[];
   private readonly unmergedPathBatches: string[][];
   private readonly switchResult: GitCommandResult;
-  private readonly mergeResult: GitCommandResult;
+  private readonly mergeResults: GitCommandResult[];
   private readonly commitResult: GitCommandResult;
   private readonly pendingMergeCommit: boolean;
   private lastStatus: GitStatusSnapshot;
@@ -257,13 +429,14 @@ class StubLocalMergeGit implements LocalMergeGit {
     unmergedPathBatches?: string[][];
     switchResult?: GitCommandResult;
     mergeResult?: GitCommandResult;
+    mergeResults?: GitCommandResult[];
     commitResult?: GitCommandResult;
     pendingMergeCommit?: boolean;
   }) {
     this.statuses = [...(options.statuses ?? [parseGitStatus("")])];
     this.unmergedPathBatches = [...(options.unmergedPathBatches ?? [])];
     this.switchResult = options.switchResult ?? gitResult();
-    this.mergeResult = options.mergeResult ?? gitResult();
+    this.mergeResults = [...(options.mergeResults ?? [options.mergeResult ?? gitResult()])];
     this.commitResult = options.commitResult ?? gitResult();
     this.pendingMergeCommit = options.pendingMergeCommit ?? false;
     this.lastStatus = this.statuses[this.statuses.length - 1] ?? parseGitStatus("");
@@ -286,7 +459,8 @@ class StubLocalMergeGit implements LocalMergeGit {
 
   async mergeBranch(branchName: string): Promise<GitCommandResult> {
     this.calls.push(`merge ${branchName}`);
-    return { ...this.mergeResult, command: `git merge ${branchName}` };
+    const result = this.mergeResults.shift() ?? gitResult();
+    return { ...result, command: `git merge ${branchName}` };
   }
 
   async unmergedPaths(): Promise<string[]> {
@@ -302,6 +476,59 @@ class StubLocalMergeGit implements LocalMergeGit {
   async commitMerge(): Promise<GitCommandResult> {
     this.calls.push("commit --no-edit");
     return { ...this.commitResult, command: "git commit --no-edit" };
+  }
+}
+
+class StubRemoteMergeGit extends StubLocalMergeGit implements RemoteMergeGit {
+  private readonly fetchResults: GitCommandResult[];
+  private readonly pushResults: GitCommandResult[];
+
+  constructor(options: ConstructorParameters<typeof StubLocalMergeGit>[0] & {
+    fetchResults?: GitCommandResult[];
+    pushResults?: GitCommandResult[];
+  }) {
+    super(options);
+    this.fetchResults = [...(options.fetchResults ?? [gitResult()])];
+    this.pushResults = [...(options.pushResults ?? [gitResult(), gitResult()])];
+  }
+
+  async fetchBranch(branchName: string): Promise<GitCommandResult> {
+    this.calls.push(`fetch ${branchName}`);
+    const result = this.fetchResults.shift() ?? gitResult();
+    return { ...result, command: `git fetch origin ${branchName}` };
+  }
+
+  async pushBranch(branchName: string): Promise<GitCommandResult> {
+    this.calls.push(`push ${branchName}`);
+    const result = this.pushResults.shift() ?? gitResult();
+    return { ...result, command: `git push -u origin ${branchName}` };
+  }
+}
+
+class StubPullRequestMerger implements PullRequestMerger {
+  readonly calls: string[] = [];
+  readonly ensureInputs: PullRequestMergeInput[] = [];
+  readonly mergeInputs: PullRequestMergeTarget[] = [];
+  private readonly mergeResults: GitCommandResult[];
+
+  constructor(
+    private readonly pullRequest: MergePullRequest,
+    mergeResults: GitCommandResult[] = [gitResult()],
+  ) {
+    this.mergeResults = [...mergeResults];
+  }
+
+  async ensureReady(input: PullRequestMergeInput): Promise<MergePullRequest> {
+    this.calls.push(`ensure ${input.sourceBranch} ${input.targetBranch}`);
+    this.ensureInputs.push(input);
+    return this.pullRequest;
+  }
+
+  async merge(input: PullRequestMergeTarget): Promise<GitCommandResult> {
+    this.calls.push(`merge ${input.prUrl}`);
+    this.mergeInputs.push(input);
+    const result = this.mergeResults.shift() ?? gitResult();
+    return { ...result, command: `gh pr merge ${input.prUrl} --merge` };
   }
 }
 
